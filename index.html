@@ -798,11 +798,11 @@ function makeDefaultYear(){
       {id:NID++,name:'媽媽保險',amount:11640,note:'殘輔險(遠雄)每年1/31扣(花旗)'},
       {id:NID++,name:'媽媽零用錢',amount:0,note:''},
       {id:NID++,name:'阿姨',amount:0,note:'沒收'},
-    ],tax:{amount:0,note:''},savingGoal:200000,customExpense:[],customSalary:[],customSaving:[],noteMap:{},deletedBase:{expense:[],salary:[],saving:[]}
+    ],tax:{amount:0,note:''},savingGoal:200000,customExpense:[],customSalary:[],customSaving:[],itemOrder:{expense:null,salary:null,saving:null},noteMap:{},deletedBase:{expense:[],salary:[],saving:[]}
   };
 }
 function makeEmptyYear(){
-  return {expense:[],salary:[],saving:[],insurance:[],savIns:[],gift:[],tax:{amount:0,note:''},savingGoal:200000,customExpense:[],customSalary:[],customSaving:[],noteMap:{},deletedBase:{expense:[],salary:[],saving:[]}};
+  return {expense:[],salary:[],saving:[],insurance:[],savIns:[],gift:[],tax:{amount:0,note:''},savingGoal:200000,customExpense:[],customSalary:[],customSaving:[],itemOrder:{expense:null,salary:null,saving:null},noteMap:{},deletedBase:{expense:[],salary:[],saving:[]}};
 }
 
 let DB=null, CY=new Date().getFullYear(), CT='expense';
@@ -899,9 +899,20 @@ function rebuildLists(){
   const deletedE=(yd.deletedBase?.expense||[]);
   const deletedS=(yd.deletedBase?.salary||[]);
   const deletedV=(yd.deletedBase?.saving||[]);
-  EI=[...EI_BASE,...(yd.customExpense||[])].filter(n=>!deletedE.includes(n));
-  SI=[...SI_BASE,...(yd.customSalary||[])].filter(n=>!deletedS.includes(n));
-  VI=[...VI_BASE,...(yd.customSaving||[])].filter(n=>!deletedV.includes(n));
+  const io=yd.itemOrder||{};
+
+  function buildList(base, custom, deleted, savedOrder){
+    const full=[...base,...(custom||[])].filter(n=>!deleted.includes(n));
+    if(!savedOrder||!savedOrder.length) return full;
+    // 以 savedOrder 為主，過濾掉已刪除的，再補上 savedOrder 沒有的新項目
+    const ordered=savedOrder.filter(n=>!deleted.includes(n));
+    const extras=full.filter(n=>!ordered.includes(n));
+    return [...ordered,...extras];
+  }
+
+  EI=buildList(EI_BASE, yd.customExpense, deletedE, io.expense);
+  SI=buildList(SI_BASE, yd.customSalary, deletedS, io.salary);
+  VI=buildList(VI_BASE, yd.customSaving, deletedV, io.saving);
   // refresh selects in add modal if open
   refreshAddSelects();
 }
@@ -1688,6 +1699,10 @@ function saveBatch(){
     // 更新 custom list：所有不在 base 裡的 kept 項目
     d[customKey[_imTab]]=kept.filter(n=>!base.includes(n));
 
+    // 儲存完整排序（包含 base + custom 的最終順序）
+    if(!d.itemOrder) d.itemOrder={expense:null,salary:null,saving:null};
+    d.itemOrder[_imTab]=kept; // kept 已是使用者排序後的順序
+
     save();rebuildLists();render();_resetDirty();_forceCloseBatch();
     toast('✓ 項目已更新！');
     return;
@@ -2322,30 +2337,38 @@ function openItemMgr(tab){
   const arr=arrMap[tab]||[];
   const dataOnly=[...new Set(arr.map(it=>it.name))].filter(n=>!base.includes(n)&&!custom.includes(n));
 
+  // 以 itemOrder 為準（若有），否則用預設順序
+  const savedOrder=(d.itemOrder||{})[tab];
+  let displayList;
+  if(savedOrder&&savedOrder.length){
+    // 已儲存順序：過濾掉已刪除的，補上未在 savedOrder 裡的新項目
+    const filtered=savedOrder.filter(n=>!deleted.includes(n));
+    const extras=[...base,...custom,...dataOnly].filter(n=>!filtered.includes(n));
+    displayList=filtered.map(n=>({
+      name:n,
+      type:base.includes(n)?'base':custom.includes(n)?'custom':'dataonly'
+    })).concat(extras.map(n=>({
+      name:n,
+      type:base.includes(n)?'base':custom.includes(n)?'custom':'dataonly'
+    })));
+  } else {
+    displayList=[
+      ...base.map(n=>({name:n,type:'base'})),
+      ...custom.map(n=>({name:n,type:'custom'})),
+      ...dataOnly.map(n=>({name:n,type:'dataonly'}))
+    ];
+  }
+
   let rows='';
   let idx=1;
-  base.forEach(name=>{
-    rows+=`<div class="im-row" data-type="base" data-orig="${name}" draggable="true">
+  displayList.forEach(({name,type})=>{
+    const ph=type==='base'?'項目名稱':type==='custom'?'項目名稱':'僅本月項目';
+    const title=type==='base'?' title="預設項目，可刪除"':'';
+    rows+=`<div class="im-row" data-type="${type}" data-orig="${name}" draggable="true">
       <span class="im-drag-handle" title="拖曳排序">⠿</span>
       <span class="im-idx">${idx++}</span>
-      <input class="im-name" value="${name}" placeholder="項目名稱" title="預設項目，可刪除">
-      <button class="im-del" onclick="confirmDelItem(this,'${name.replace(/'/g,"\\'")}')">×</button>
-    </div>`;
-  });
-  custom.forEach(name=>{
-    rows+=`<div class="im-row" data-type="custom" data-orig="${name}" draggable="true">
-      <span class="im-drag-handle" title="拖曳排序">⠿</span>
-      <span class="im-idx">${idx++}</span>
-      <input class="im-name" value="${name}" placeholder="項目名稱">
-      <button class="im-del" onclick="confirmDelItem(this,'${name.replace(/'/g,"\\'")}')">×</button>
-    </div>`;
-  });
-  dataOnly.forEach(name=>{
-    rows+=`<div class="im-row" data-type="dataonly" data-orig="${name}" draggable="true">
-      <span class="im-drag-handle" title="拖曳排序">⠿</span>
-      <span class="im-idx">${idx++}</span>
-      <input class="im-name" value="${name}" placeholder="僅本月項目">
-      <button class="im-del" onclick="confirmDelItem(this,'${name.replace(/'/g,"\\'")}')">×</button>
+      <input class="im-name" value="${htmlEscape(name)}" placeholder="${ph}"${title}>
+      <button class="im-del" onclick="confirmDelItem(this,'${name.replace(/'/g,"\\'").replace(/"/g,'\"')}')">×</button>
     </div>`;
   });
 
