@@ -1667,11 +1667,13 @@ function saveBatch(){
     // 收集留下的項目
     const kept=[];
     const renames={}; // {oldName: newName}
+    // dataset.orig 已經是 HTML-decoded（瀏覽器自動處理），不需要額外 unescape
     rows.forEach(row=>{
-      const orig=row.dataset.orig;
+      const orig=row.dataset.orig; // 瀏覽器 dataset 自動 HTML decode
       const newName=(row.querySelector('.im-name')?.value||'').trim();
       if(!newName)return; // 空名跳過
       kept.push(newName);
+      // 只有真正改名才記（orig 和 newName 都是 decoded 字串，可直接比對）
       if(orig&&orig!==newName) renames[orig]=newName;
     });
 
@@ -2365,13 +2367,13 @@ function openItemMgr(tab){
     var n=item.name, t=item.type;
     var ph=t==='base'?'項目名稱':t==='custom'?'項目名稱':'僅本月項目';
     var ta=t==='base'?' title="預設項目，可刪除"':'';
-    var sv=n.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    var sj=n.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    rows+='<div class="im-row" data-type="'+t+'" data-orig="'+sv+'" draggable="true">'
-         +'<span class="im-drag-handle" title="拖曳排序">⠿</span>'
+    var sv=n.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    var so=n.replace(/"/g,"&quot;");
+    rows+='<div class="im-row" data-type="'+t+'" data-orig="'+so+'" draggable="true">'
+         +'<span class="im-drag-handle" title="拖曳排序">⠇</span>'
          +'<span class="im-idx">'+(idx++)+'</span>'
          +'<input class="im-name" value="'+sv+'" placeholder="'+ph+'"'+ta+'>'
-         +'<button class="im-del" onclick="confirmDelItem(this,\''+sj+'\')">×</button>'
+         +'<button class="im-del" onclick="confirmDelItem(this,this.closest(\'.im-row\').dataset.orig)">×</button>'
          +'</div>';
   });
 
@@ -2397,7 +2399,7 @@ function addImRow(){
   div.innerHTML=`<span class="im-drag-handle" title="拖曳排序">⠿</span>
     <span class="im-idx">${idx}</span>
     <input class="im-name" value="" placeholder="請輸入新項目名稱" autofocus>
-    <button class="im-del" onclick="confirmDelItem(this,'')">×</button>`;
+    <button class="im-del" onclick="confirmDelItem(this,this.closest('.im-row').dataset.orig)">×</button>`;
   initDragRow(div);
   container.appendChild(div);
   div.querySelector('input').focus();
