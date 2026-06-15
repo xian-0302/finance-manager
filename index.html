@@ -2361,15 +2361,18 @@ function openItemMgr(tab){
 
   let rows='';
   let idx=1;
-  displayList.forEach(({name,type})=>{
-    const ph=type==='base'?'項目名稱':type==='custom'?'項目名稱':'僅本月項目';
-    const title=type==='base'?' title="預設項目，可刪除"':'';
-    rows+=`<div class="im-row" data-type="${type}" data-orig="${name}" draggable="true">
-      <span class="im-drag-handle" title="拖曳排序">⠿</span>
-      <span class="im-idx">${idx++}</span>
-      <input class="im-name" value="${htmlEscape(name)}" placeholder="${ph}"${title}>
-      <button class="im-del" onclick="confirmDelItem(this,'${name.replace(/'/g,"\\'").replace(/"/g,'\"')}')">×</button>
-    </div>`;
+  displayList.forEach(function(item){
+    var n=item.name, t=item.type;
+    var ph=t==='base'?'項目名稱':t==='custom'?'項目名稱':'僅本月項目';
+    var ta=t==='base'?' title="預設項目，可刪除"':'';
+    var sv=n.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    var sj=n.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    rows+='<div class="im-row" data-type="'+t+'" data-orig="'+sv+'" draggable="true">'
+         +'<span class="im-drag-handle" title="拖曳排序">⠿</span>'
+         +'<span class="im-idx">'+(idx++)+'</span>'
+         +'<input class="im-name" value="'+sv+'" placeholder="'+ph+'"'+ta+'>'
+         +'<button class="im-del" onclick="confirmDelItem(this,\''+sj+'\')">×</button>'
+         +'</div>';
   });
 
   batchCat='__itemmgr__';
