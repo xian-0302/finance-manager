@@ -270,6 +270,13 @@ tr.swipeable.swiping td{transition:none;}
 .sync-badge.offline{color:#8b2020;}
 .sync-spinner{width:10px;height:10px;border:1.5px solid var(--m200);border-top-color:var(--m400);border-radius:50%;animation:spin .7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
+
+/* ── 拖曳排序 ──────────────────────────────── */
+.im-row{cursor:default;transition:background .15s,box-shadow .15s;}
+.im-drag-handle{width:22px;height:30px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:grab;color:var(--m300);font-size:16px;touch-action:none;user-select:none;}
+.im-drag-handle:active{cursor:grabbing;}
+.im-row.dragging{opacity:.45;background:var(--m100);box-shadow:0 4px 16px rgba(0,0,0,.12);border-radius:var(--rs2);}
+.im-row.drag-over{border-top:2.5px solid var(--m400);}
 </style>
 </head>
 <body>
@@ -1366,6 +1373,8 @@ function openBatchEdit(cat){
   document.getElementById('editFoot').style.display='block';
   _setAddBar(false);_resetDirty();
   document.getElementById('batchMo').classList.add('open');
+  // 初始化所有列的拖曳
+  document.querySelectorAll('#imRows .im-row').forEach(initDragRow);
 }
 
 function buildBatchBody(cat,d,curM){
@@ -2316,21 +2325,24 @@ function openItemMgr(tab){
   let rows='';
   let idx=1;
   base.forEach(name=>{
-    rows+=`<div class="im-row" data-type="base" data-orig="${name}">
+    rows+=`<div class="im-row" data-type="base" data-orig="${name}" draggable="true">
+      <span class="im-drag-handle" title="拖曳排序">⠿</span>
       <span class="im-idx">${idx++}</span>
       <input class="im-name" value="${name}" placeholder="項目名稱" title="預設項目，可刪除">
       <button class="im-del" onclick="confirmDelItem(this,'${name.replace(/'/g,"\\'")}')">×</button>
     </div>`;
   });
   custom.forEach(name=>{
-    rows+=`<div class="im-row" data-type="custom" data-orig="${name}">
+    rows+=`<div class="im-row" data-type="custom" data-orig="${name}" draggable="true">
+      <span class="im-drag-handle" title="拖曳排序">⠿</span>
       <span class="im-idx">${idx++}</span>
       <input class="im-name" value="${name}" placeholder="項目名稱">
       <button class="im-del" onclick="confirmDelItem(this,'${name.replace(/'/g,"\\'")}')">×</button>
     </div>`;
   });
   dataOnly.forEach(name=>{
-    rows+=`<div class="im-row" data-type="dataonly" data-orig="${name}">
+    rows+=`<div class="im-row" data-type="dataonly" data-orig="${name}" draggable="true">
+      <span class="im-drag-handle" title="拖曳排序">⠿</span>
       <span class="im-idx">${idx++}</span>
       <input class="im-name" value="${name}" placeholder="僅本月項目">
       <button class="im-del" onclick="confirmDelItem(this,'${name.replace(/'/g,"\\'")}')">×</button>
@@ -2347,18 +2359,129 @@ function openItemMgr(tab){
   document.getElementById('editFoot').style.display='block';
   _setAddBar(false);_resetDirty();
   document.getElementById('batchMo').classList.add('open');
+  // 初始化所有列的拖曳
+  document.querySelectorAll('#imRows .im-row').forEach(initDragRow);
 }
 function addImRow(){
   const container=document.getElementById('imRows');
   const idx=container.querySelectorAll('.im-row').length+1;
   const div=document.createElement('div');
   div.className='im-row';div.dataset.type='new';div.dataset.orig='';
-  div.innerHTML=`<span class="im-idx">${idx}</span>
+  div.setAttribute('draggable','true');
+  div.innerHTML=`<span class="im-drag-handle" title="拖曳排序">⠿</span>
+    <span class="im-idx">${idx}</span>
     <input class="im-name" value="" placeholder="請輸入新項目名稱" autofocus>
     <button class="im-del" onclick="confirmDelItem(this,'')">×</button>`;
+  initDragRow(div);
   container.appendChild(div);
   div.querySelector('input').focus();
   _markDirty();
+}
+
+
+// ════════════════════════════════════════════════
+// 管理項目：拖曳排序（滑鼠 + 觸控）
+// ════════════════════════════════════════════════
+let _dragSrc=null;
+
+function initDragRow(row){
+  // ── 滑鼠拖曳 ──
+  row.addEventListener('dragstart',e=>{
+    _dragSrc=row;
+    row.classList.add('dragging');
+    e.dataTransfer.effectAllowed='move';
+  });
+  row.addEventListener('dragend',()=>{
+    row.classList.remove('dragging');
+    document.querySelectorAll('#imRows .im-row').forEach(r=>r.classList.remove('drag-over'));
+    _updateImIdx();
+    _markDirty();
+  });
+  row.addEventListener('dragover',e=>{
+    e.preventDefault();
+    if(_dragSrc&&_dragSrc!==row){
+      document.querySelectorAll('#imRows .im-row').forEach(r=>r.classList.remove('drag-over'));
+      row.classList.add('drag-over');
+    }
+  });
+  row.addEventListener('drop',e=>{
+    e.preventDefault();
+    if(_dragSrc&&_dragSrc!==row){
+      const container=document.getElementById('imRows');
+      const rows=[...container.querySelectorAll('.im-row')];
+      const srcIdx=rows.indexOf(_dragSrc);
+      const tgtIdx=rows.indexOf(row);
+      if(srcIdx<tgtIdx) container.insertBefore(_dragSrc,row.nextSibling);
+      else container.insertBefore(_dragSrc,row);
+      _updateImIdx();
+      _markDirty();
+    }
+    document.querySelectorAll('#imRows .im-row').forEach(r=>r.classList.remove('drag-over'));
+  });
+
+  // ── 觸控拖曳 ──
+  const handle=row.querySelector('.im-drag-handle');
+  if(!handle) return;
+  let _ty=0,_startY=0,_clone=null;
+  handle.addEventListener('touchstart',e=>{
+    const t=e.touches[0];
+    _startY=t.clientY;
+    _dragSrc=row;
+    row.classList.add('dragging');
+    // 建立視覺 clone
+    _clone=row.cloneNode(true);
+    _clone.style.cssText=`position:fixed;left:${row.getBoundingClientRect().left}px;top:${row.getBoundingClientRect().top}px;width:${row.offsetWidth}px;z-index:9999;opacity:.85;pointer-events:none;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.2);`;
+    document.body.appendChild(_clone);
+    e.preventDefault();
+  },{passive:false});
+  handle.addEventListener('touchmove',e=>{
+    if(!_dragSrc) return;
+    const t=e.touches[0];
+    _ty=t.clientY-_startY;
+    if(_clone) _clone.style.top=(parseFloat(_clone.style.top)+(_ty-(parseFloat(_clone.style.top)-_clone.getBoundingClientRect().top+_startY-parseFloat(_clone.style.top))))+'px';
+    // 重新計算 clone 位置
+    if(_clone) _clone.style.top=(row.getBoundingClientRect().top+_ty)+'px';
+    // 找目標列
+    const container=document.getElementById('imRows');
+    const rows=[...container.querySelectorAll('.im-row')].filter(r=>r!==_dragSrc);
+    rows.forEach(r=>r.classList.remove('drag-over'));
+    const target=rows.find(r=>{
+      const rect=r.getBoundingClientRect();
+      return t.clientY>=rect.top&&t.clientY<=rect.bottom;
+    });
+    if(target) target.classList.add('drag-over');
+    e.preventDefault();
+  },{passive:false});
+  handle.addEventListener('touchend',e=>{
+    if(!_dragSrc) return;
+    const t=e.changedTouches[0];
+    const container=document.getElementById('imRows');
+    const rows=[...container.querySelectorAll('.im-row')];
+    const target=rows.find(r=>{
+      if(r===_dragSrc) return false;
+      const rect=r.getBoundingClientRect();
+      return t.clientY>=rect.top&&t.clientY<=rect.bottom;
+    });
+    if(target){
+      const srcIdx=rows.indexOf(_dragSrc);
+      const tgtIdx=rows.indexOf(target);
+      if(srcIdx<tgtIdx) container.insertBefore(_dragSrc,target.nextSibling);
+      else container.insertBefore(_dragSrc,target);
+    }
+    _dragSrc.classList.remove('dragging');
+    document.querySelectorAll('#imRows .im-row').forEach(r=>r.classList.remove('drag-over'));
+    if(_clone){_clone.remove();_clone=null;}
+    _dragSrc=null;
+    _updateImIdx();
+    _markDirty();
+  });
+}
+
+function _updateImIdx(){
+  document.querySelectorAll('#imRows .im-row').forEach((r,i)=>{
+    const span=r.querySelector('.im-idx');
+    if(span) span.textContent=i+1;
+  });
 }
 
 // ════════════════════════════════════════════════
