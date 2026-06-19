@@ -1060,6 +1060,21 @@ function rFixed(tbodyId,list,arr,cls,m,tabKey){
   return tot;
 }
 
+// 「其他項目」專屬渲染：不分月份、不可點入逐月細項，正確顯示備註
+function rOtherSaving(tbodyId, list, arr){
+  let tot=0;
+  document.getElementById(tbodyId).innerHTML = list.map(name=>{
+    const rec = arr.find(it=>it.name===name);
+    if(rec){
+      tot += rec.amount;
+      const note = rec.note || splitName(name).sub;
+      return `<tr><td class="td-n">${nameCell(name,'',note)}</td><td class="td-v vs">${fmt(rec.amount)}</td></tr>`;
+    }
+    return `<tr><td class="td-n">${nameCell(name)}</td><td class="td-v vn">-</td></tr>`;
+  }).join('');
+  return tot;
+}
+
 function rExpense(){
   rMonths('eMonths','expense');
   const d=YD();
@@ -1124,7 +1139,7 @@ function rSaving(){
   document.getElementById('vTotal').textContent=fmt(t);
   document.getElementById('vTotalLbl').textContent=CM.saving===0?'年存款總計':'月存款合計';
   // 其他項目（不計入年存款）
-  rFixed('vOtherTbody',VI_OTHER,YD().saving,'vs',CM.saving,'saving');
+  rOtherSaving('vOtherTbody',VI_OTHER,YD().saving);
   // 年度存款進度：永遠使用「整年」的年存款總計（跟全年模式下的年存款總計同一個數字），
   // 不受目前選定的月份分頁影響，也排除其他項目（爸媽保險）
   const allYearItemsForGoal=[...new Set(d.saving.map(it=>it.name))].filter(n=>!excludeFromMain(n));
