@@ -1135,16 +1135,23 @@ function rSaving(){
     const extraNames=monthItems.filter(n=>!excludeFromMain(n));
     vList=[...VI,...extraNames];
   }
-  const t=rFixed('vTbody',vList,d.saving,'vs',CM.saving,'saving');
-  document.getElementById('vTotal').textContent=fmt(t);
+  rFixed('vTbody',vList,d.saving,'vs',CM.saving,'saving');
+  // 年存款總計／月存款合計：只計算「名稱為存錢」的項目（不含保險、所得稅、旅遊基金、投資等其他子項）
+  const savingOnlyNames = vList.filter(n=>splitName(n).main==='存錢');
+  let savingTotal=0;
+  if(CM.saving===0){
+    savingOnlyNames.forEach(n=>{savingTotal+=getYearTotal(d.saving,n);});
+  } else {
+    savingOnlyNames.forEach(n=>{const rec=getPrim(d.saving,n,CM.saving);if(rec)savingTotal+=rec.amount;});
+  }
+  document.getElementById('vTotal').textContent=fmt(savingTotal);
   document.getElementById('vTotalLbl').textContent=CM.saving===0?'年存款總計':'月存款合計';
   // 其他項目（不計入年存款）
   rOtherSaving('vOtherTbody',VI_OTHER,YD().saving);
-  // 年度存款進度：永遠使用「整年」的年存款總計（跟全年模式下的年存款總計同一個數字），
-  // 不受目前選定的月份分頁影響，也排除其他項目（爸媽保險）
+  // 年度存款進度：永遠使用「整年」的存錢總計（跟年存款總計同一套計算方式），不受目前選定的月份分頁影響
   const allYearItemsForGoal=[...new Set(d.saving.map(it=>it.name))].filter(n=>!excludeFromMain(n));
-  const fullYearList=[...VI,...allYearItemsForGoal];
-  const a=fullYearList.reduce((s,name)=>s+getYearTotal(d.saving,name),0);
+  const fullYearSavingNames=[...VI,...allYearItemsForGoal].filter(n=>splitName(n).main==='存錢');
+  const a=fullYearSavingNames.reduce((s,name)=>s+getYearTotal(d.saving,name),0);
   const g=YD().savingGoal||200000,p=Math.min(100,Math.round(a/g*100));
   document.getElementById('vBar').style.width=p+'%';document.getElementById('vPct').textContent=p+'%';
   document.getElementById('vTxt').textContent=`年存款 ${fmt(a)} / 目標 ${fmt(g)}`;
