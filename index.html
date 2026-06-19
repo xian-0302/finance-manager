@@ -375,6 +375,7 @@ tr.swipeable.swiping td{transition:none;}
       <div class="card-wrap" style="margin-top:14px;">
         <div class="card-hd">
           <span class="card-hd-title">其他項目（不計入年存款）</span>
+          <button class="edit-all-btn" onclick="openBatchEdit('vOther')">✏️ 編輯</button>
         </div>
         <div class="card-no-mb" style="padding:9px 7px;">
           <table class="ft"><thead><tr><th style="width:55%">項目</th><th class="r" style="width:45%">金額</th></tr></thead>
@@ -710,7 +711,7 @@ let NID=700;
 const EI_BASE=['生活費','電話費','伙食費(公司)','保險費','房貸','貸款','水、電、瓦斯','孝親費'];
 const SI_BASE=['薪水','超勤(239/HR)','補貼','不休假獎金','考績獎金','年終獎金','鐘點費'];
 const VI_BASE=['存錢(NEW BANK)','存錢(SNY華南銀行)','存錢(I LEO)','存錢(空白)','保險(BANKEE、國泰)','所得稅(BANKEE)','旅遊基金(合庫)','投資(永豐大戶)','投資(國泰)定期定額'];
-const VI_OTHER=['爸媽保險(將來銀行)','Richart美元'];
+const VI_OTHER=['爸媽保險(將來銀行)'];
 const VI_GOAL=['存錢(NEW BANK)','存錢(SNY華南銀行)','存錢(I LEO)'];
 // EI / SI / VI will be computed dynamically from base + custom
 let EI=EI_BASE.slice(), SI=SI_BASE.slice(), VI=VI_BASE.slice();
@@ -1374,7 +1375,7 @@ function _setAddBar(show){
 function openBatchEdit(cat){
   batchCat=cat;
   const d=YD();
-  const titles={expense:'支出明細',salary:'薪資結構',saving:'存錢計畫',insurance:'保險（台幣）',savIns:'儲蓄險（美元）',gift:'紅包分配',tax:'所得稅'};
+  const titles={expense:'支出明細',salary:'薪資結構',saving:'存錢計畫',vOther:'其他項目',insurance:'保險（台幣）',savIns:'儲蓄險（美元）',gift:'紅包分配',tax:'所得稅'};
   document.getElementById('batchTitle').textContent='✏️ 編輯 '+titles[cat];
   // 把當前停留的月份傳進去，讓空白佔位列預設該月份
   const curM = CM[cat]||0;
@@ -1392,6 +1393,7 @@ function buildBatchBody(cat,d,curM){
   if(cat==='expense') return buildFixedRows(EI, d.expense, 'e', '支出', curM);
   if(cat==='salary')  return buildFixedRows(SI,  d.salary,  's', '薪資', curM);
   if(cat==='saving')  return buildFixedRows(VI,  d.saving,  'v', '存款', curM);
+  if(cat==='vOther')  return buildFixedRows(VI_OTHER, d.saving, 'v', '存款', curM);
   if(cat==='insurance') return buildDynRows(d.insurance,'ins');
   if(cat==='savIns')    return buildSavInsRows(d.savIns);
   if(cat==='gift')      return buildDynRows(d.gift,'gift');
@@ -1713,7 +1715,7 @@ function saveBatch(){
   const d=YD();
   const rows=[...document.querySelectorAll('#batchBody .be-row')];
 
-  if(batchCat==='expense'||batchCat==='salary'||batchCat==='saving'){
+  if(batchCat==='expense'||batchCat==='salary'||batchCat==='saving'||batchCat==='vOther'){
     const arr=batchCat==='expense'?d.expense:batchCat==='salary'?d.salary:d.saving;
     // 判斷是特定月份模式還是全年模式
     // 特定月份模式：所有列的 month 值相同且 > 0，且月份欄是 hidden input
@@ -1780,7 +1782,10 @@ function saveBatch(){
       });
       if(batchCat==='expense')d.expense=newArr;
       else if(batchCat==='salary')d.salary=newArr;
-      else {
+      else if(batchCat==='vOther'){
+        // 「其他項目」編輯：只替換 VI_OTHER 名稱的項目，保留其餘存款項目不動
+        d.saving = d.saving.filter(it=>!VI_OTHER.includes(it.name)).concat(newArr);
+      } else {
         d.saving=newArr;
         // 自訂名稱（不在基礎清單中）記錄到 customSaving
         newArr.forEach(it=>{
