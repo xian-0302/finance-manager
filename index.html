@@ -320,7 +320,6 @@ tr.swipeable.swiping td{transition:none;}
         <div class="card-hd">
           <span class="card-hd-title">支出項目</span>
           <div style="display:flex;gap:6px;">
-            <button class="edit-all-btn" id="eCopyBtn" onclick="copyLastMonth('expense')" style="display:none">📋 複製上月</button>
             <button class="edit-all-btn" onclick="openItemMgr('expense')">📝 管理項目</button>
             <button class="edit-all-btn" onclick="openBatchEdit('expense')">✏️ 編輯明細</button>
           </div>
@@ -340,7 +339,6 @@ tr.swipeable.swiping td{transition:none;}
         <div class="card-hd">
           <span class="card-hd-title">薪資項目</span>
           <div style="display:flex;gap:6px;">
-            <button class="edit-all-btn" id="sCopyBtn" onclick="copyLastMonth('salary')" style="display:none">📋 複製上月</button>
             <button class="edit-all-btn" onclick="openItemMgr('salary')">📝 管理項目</button>
             <button class="edit-all-btn" onclick="openBatchEdit('salary')">✏️ 編輯明細</button>
           </div>
@@ -361,7 +359,6 @@ tr.swipeable.swiping td{transition:none;}
         <div class="card-hd">
           <span class="card-hd-title">存錢項目</span>
           <div style="display:flex;gap:6px;">
-            <button class="edit-all-btn" id="vCopyBtn" onclick="copyLastMonth('saving')" style="display:none">📋 複製上月</button>
             <button class="edit-all-btn" onclick="openItemMgr('saving')">📝 管理項目</button>
             <button class="edit-all-btn" onclick="openBatchEdit('saving')">✏️ 編輯明細</button>
           </div>
@@ -1081,8 +1078,6 @@ function rExpense(){
   const t=rFixed('eTbody',eList,d.expense,'ve',CM.expense,'expense');
   document.getElementById('eTotal').textContent=fmt(t);
   document.getElementById('eTotalLbl').textContent=CM.expense===0?'年支出總計':'月支出總計';
-  // 複製上月按鈕：特定月份 ≥ 2 才顯示
-  document.getElementById('eCopyBtn').style.display=CM.expense>=2?'flex':'none';
 }
 function rSalary(){
   rMonths('sMonths','salary');
@@ -1105,7 +1100,6 @@ function rSalary(){
   document.getElementById('sTotalLbl').textContent=CM.salary===0?'年合計':'月合計';
   document.getElementById('aInc').textContent=fmt(calcAI());
   document.getElementById('aLbl').textContent=CY+'年 年度總收入（估計）';
-  document.getElementById('sCopyBtn').style.display=CM.salary>=2?'flex':'none';
 }
 function rSaving(){
   rMonths('vMonths','saving');
@@ -1135,7 +1129,6 @@ function rSaving(){
   document.getElementById('vBar').style.width=p+'%';document.getElementById('vPct').textContent=p+'%';
   document.getElementById('vTxt').textContent=`年存款 ${fmt(a)} / 目標 ${fmt(g)}`;
   document.getElementById('goalBtn').textContent=`🎯 ${fmt(g)}`;
-  document.getElementById('vCopyBtn').style.display=CM.saving>=2?'flex':'none';
 }
 
 // ── 存款目標 Modal ────────────────────────────────
@@ -1393,7 +1386,7 @@ function buildBatchBody(cat,d,curM){
   if(cat==='expense') return buildFixedRows(EI, d.expense, 'e', '支出', curM);
   if(cat==='salary')  return buildFixedRows(SI,  d.salary,  's', '薪資', curM);
   if(cat==='saving')  return buildFixedRows(VI,  d.saving,  'v', '存款', curM);
-  if(cat==='vOther')  return buildFixedRows(VI_OTHER, d.saving, 'v', '存款', curM);
+  if(cat==='vOther')  return buildOtherRows(VI_OTHER, d.saving);
   if(cat==='insurance') return buildDynRows(d.insurance,'ins');
   if(cat==='savIns')    return buildSavInsRows(d.savIns);
   if(cat==='gift')      return buildDynRows(d.gift,'gift');
@@ -1443,6 +1436,31 @@ function buildFixedRows(list, arr, pfx, typeLabel, curM){
     ? `<button class="add-row-btn" onclick="addSavingRow(${curM})">＋ 新增存款項目</button>`
     : '';
   return rows.join('')+addBtn;
+}
+
+// 「其他項目」：每個名稱只有一筆獨立紀錄，不分月份
+function buildOtherRows(list, arr){
+  return list.map(name=>{
+    const rec = arr.find(it=>it.name===name);
+    const amount = rec ? rec.amount : '';
+    const note = rec ? (rec.note||'') : '';
+    const id = rec ? rec.id : 'new_'+NID++;
+    return `<div class="be-row" data-id="${id}" data-name="${name}" data-pfx="v">
+    <div class="be-row-title">${name}</div>
+    <div class="be-field">
+      <div class="be-field-label">金額（台幣）</div>
+      <div class="calc-wrap">
+        <input class="fi-sm" data-field="amount" type="number" inputmode="numeric" placeholder="0" value="${amount}">
+        <button class="calc-btn" type="button" onclick="openCalcOnEl(this.previousElementSibling)">🧮</button>
+      </div>
+    </div>
+    <input type="hidden" data-field="month" value="0">
+    <div class="be-field">
+      <div class="be-field-label">備註（選填）</div>
+      <input class="fi-sm" data-field="note" placeholder="備註" value="${note}">
+    </div>
+  </div>`;
+  }).join('');
 }
 
 function fixedRow(pfx, id, name, amount, month, note, isEmpty, curM){
@@ -2541,30 +2559,6 @@ function _delItemCancel(){
   document.getElementById('delItemOverlay').classList.remove('open');
   _delItemRow=null;
   _delItemName='';
-}
-
-// ════════════════════════════════════════════════
-// 複製上月
-// ════════════════════════════════════════════════
-function copyLastMonth(tab){
-  const curM=CM[tab];
-  if(curM<2)return;
-  const prevM=curM-1;
-  const d=YD();
-  const arr=tab==='expense'?d.expense:tab==='salary'?d.salary:d.saving;
-  // 找上月所有紀錄（含 month=0 每月固定的）
-  const prevRecs=arr.filter(it=>it.month===prevM);
-  if(!prevRecs.length){toast('上月沒有資料可複製');return;}
-  let added=0;
-  prevRecs.forEach(rec=>{
-    // 檢查本月是否已有同名紀錄
-    const exists=arr.find(it=>it.name===rec.name&&it.month===curM);
-    if(exists)return; // 已有就跳過
-    arr.push({id:NID++,name:rec.name,amount:rec.amount,month:curM,note:rec.note||''});
-    added++;
-  });
-  if(added===0){toast('本月已有完整資料，無須複製');return;}
-  save();render();toast(`✓ 已複製 ${added} 筆到 ${curM}月！`);
 }
 
 load();
