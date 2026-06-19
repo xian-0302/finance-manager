@@ -709,6 +709,7 @@ const EI_BASE=['生活費','電話費','伙食費(公司)','保險費','房貸',
 const SI_BASE=['薪水','超勤(239/HR)','補貼','不休假獎金','考績獎金','年終獎金','鐘點費'];
 const VI_BASE=['存錢(NEW BANK)','存錢(SNY華南銀行)','存錢(I LEO)','存錢(空白)','保險(BANKEE、國泰)','所得稅(BANKEE)','旅遊基金(合庫)','投資(永豐大戶)','投資(國泰)定期定額'];
 const VI_OTHER=['爸媽保險(將來銀行)'];
+const VI_HIDDEN=['Richart美元']; // 已停用項目，不在任何清單顯示
 const VI_GOAL=['存錢(NEW BANK)','存錢(SNY華南銀行)','存錢(I LEO)'];
 // EI / SI / VI will be computed dynamically from base + custom
 let EI=EI_BASE.slice(), SI=SI_BASE.slice(), VI=VI_BASE.slice();
@@ -1106,15 +1107,17 @@ function rSaving(){
   const d=YD();
   // 構建該月的項目列表：VI（基礎+自訂） + 該月份實際出現的「僅本月」自訂項目
   let vList=VI;
+  // 「其他項目」清單（爸媽保險等）絕不可混入年存款主清單
+  const excludeFromMain=n=>VI.includes(n)||VI_OTHER.includes(n)||VI_HIDDEN.includes(n);
   if(CM.saving===0){
-    // 全年模式：包含整年所有月份實際出現的項目
+    // 全年模式：包含整年所有月份實際出現的項目（排除其他項目清單）
     const allYearItems=d.saving.map(it=>it.name);
-    const extraNames=[...new Set(allYearItems)].filter(n=>!VI.includes(n));
+    const extraNames=[...new Set(allYearItems)].filter(n=>!excludeFromMain(n));
     vList=[...VI,...extraNames];
   } else if(CM.saving>0){
-    // 特定月份模式：包含該月份實際出現的「僅本月」項目
+    // 特定月份模式：包含該月份實際出現的「僅本月」項目（排除其他項目清單）
     const monthItems=d.saving.filter(it=>it.month===CM.saving).map(it=>it.name);
-    const extraNames=monthItems.filter(n=>!VI.includes(n));
+    const extraNames=monthItems.filter(n=>!excludeFromMain(n));
     vList=[...VI,...extraNames];
   }
   const t=rFixed('vTbody',vList,d.saving,'vs',CM.saving,'saving');
