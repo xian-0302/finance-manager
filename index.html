@@ -1125,9 +1125,11 @@ function rSaving(){
   document.getElementById('vTotalLbl').textContent=CM.saving===0?'年存款總計':'月存款合計';
   // 其他項目（不計入年存款）
   rFixed('vOtherTbody',VI_OTHER,YD().saving,'vs',CM.saving,'saving');
-  const now=new Date(), nowY=now.getFullYear(), nowM=now.getMonth()+1;
-  const months = CY<nowY ? 12 : CY>nowY ? 0 : nowM;
-  const a=YD().saving.filter(it=>isOccurred(it)&&VI_GOAL.includes(it.name)).reduce((s,it)=>it.month===0?s+it.amount*months:s+it.amount,0);
+  // 年度存款進度：永遠使用「整年」的年存款總計（跟全年模式下的年存款總計同一個數字），
+  // 不受目前選定的月份分頁影響，也排除其他項目（爸媽保險）
+  const allYearItemsForGoal=[...new Set(d.saving.map(it=>it.name))].filter(n=>!excludeFromMain(n));
+  const fullYearList=[...VI,...allYearItemsForGoal];
+  const a=fullYearList.reduce((s,name)=>s+getYearTotal(d.saving,name),0);
   const g=YD().savingGoal||200000,p=Math.min(100,Math.round(a/g*100));
   document.getElementById('vBar').style.width=p+'%';document.getElementById('vPct').textContent=p+'%';
   document.getElementById('vTxt').textContent=`年存款 ${fmt(a)} / 目標 ${fmt(g)}`;
