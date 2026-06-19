@@ -885,7 +885,37 @@ function load(){
   });
   if(DB.nextId&&DB.nextId>maxId)maxId=DB.nextId;
   NID=maxId;
+
+  // 一次性修復：清除過去因儲存異常產生的重複紀錄（同名稱+同月份+同金額+同備註）
+  const fixed = dedupeAllData();
   initYrSel();rebuildLists();render();
+  if(fixed){save();toast('✓ 已自動修復重複資料，金額已校正');}
+}
+
+// 去除完全相同的重複紀錄（name+month+amount+note 皆相同視為重複，只保留一筆）
+function dedupeArr(arr){
+  const seen=new Set();
+  const out=[];
+  let removedAny=false;
+  arr.forEach(it=>{
+    const key=it.name+'|'+it.month+'|'+it.amount+'|'+(it.note||'');
+    if(seen.has(key)){removedAny=true;return;}
+    seen.add(key);
+    out.push(it);
+  });
+  return {out,removedAny};
+}
+function dedupeAllData(){
+  let anyFixed=false;
+  Object.values(DB.data).forEach(yd=>{
+    ['expense','salary','saving'].forEach(k=>{
+      if(Array.isArray(yd[k])){
+        const {out,removedAny}=dedupeArr(yd[k]);
+        if(removedAny){yd[k]=out;anyFixed=true;}
+      }
+    });
+  });
+  return anyFixed;
 }
 function save(){
   DB.nextId=NID; // 持久化 NID
@@ -2621,9 +2651,11 @@ function initFirebase() {
           const local = localStorage.getItem(SK) ? JSON.parse(localStorage.getItem(SK)) : null;
           if (!local || (fbData.savedAt && (!local.savedAt || fbData.savedAt > local.savedAt))) {
             DB = fbData;
+            const fixed = (typeof dedupeAllData==='function') ? dedupeAllData() : false;
             localStorage.setItem(SK, JSON.stringify(DB));
             rebuildLists(); render();
             showSync('saved', '✓ 已從雲端載入');
+            if (fixed) { pushToFirebase(); toast('✓ 已自動修復重複資料，金額已校正'); }
           }
         } catch(e) {
           DB = fbData;
