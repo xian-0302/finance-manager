@@ -2649,13 +2649,29 @@ function initFirebase() {
       if (fbData) {
         try {
           const local = localStorage.getItem(SK) ? JSON.parse(localStorage.getItem(SK)) : null;
-          if (!local || (fbData.savedAt && (!local.savedAt || fbData.savedAt > local.savedAt))) {
+          // 計算本機與 Firebase 的資料總筆數，以筆數較多的為主（避免舊資料覆蓋新資料）
+          function countRecs(d){
+            if(!d||!d.data)return 0;
+            return Object.values(d.data).reduce((s,yd)=>{
+              return s+['expense','salary','saving','insurance','savIns','gift'].reduce((ss,k)=>ss+(Array.isArray(yd[k])?yd[k].length:0),0);
+            },0);
+          }
+          const fbCount=countRecs(fbData);
+          const localCount=countRecs(local);
+          // 選擇資料量較多的一份；若一樣多則用 savedAt 判斷
+          const useFB = !local || fbCount > localCount ||
+            (fbCount === localCount && fbData.savedAt && (!local.savedAt || fbData.savedAt >= local.savedAt));
+          if(useFB){
             DB = fbData;
             const fixed = (typeof dedupeAllData==='function') ? dedupeAllData() : false;
             localStorage.setItem(SK, JSON.stringify(DB));
             rebuildLists(); render();
             showSync('saved', '✓ 已從雲端載入');
             if (fixed) { pushToFirebase(); toast('✓ 已自動修復重複資料，金額已校正'); }
+          } else {
+            // 本機資料較新或較多，把本機資料推回 Firebase
+            showSync('saving', '本機資料較新，同步中…');
+            pushToFirebase();
           }
         } catch(e) {
           DB = fbData;
