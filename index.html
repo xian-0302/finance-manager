@@ -2622,6 +2622,9 @@ load();
 </script>
 
 <script type="module">
+// ══════════════════════════════════════════════
+// Firebase 設定
+// ══════════════════════════════════════════════
 const FIREBASE_CONFIG = {
   "apiKey": "AIzaSyBtc-FFel7yC68H0dI02Ce845T01zozp_g",
   "authDomain": "xian-manager.firebaseapp.com",
@@ -2636,57 +2639,65 @@ let firebaseReady = false;
 let fbDB = null;
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-import { getDatabase, ref, set, onValue } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
+import { getDatabase, ref, set, get } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
 function initFirebase() {
   try {
     const app = initializeApp(FIREBASE_CONFIG);
     fbDB = getDatabase(app);
     firebaseReady = true;
-    const dataRef = ref(fbDB, FB_PATH);
-    onValue(dataRef, (snapshot) => {
-      const fbData = snapshot.val();
-      if (fbData) {
-        try {
-          const local = localStorage.getItem(SK) ? JSON.parse(localStorage.getItem(SK)) : null;
-          // 計算本機與 Firebase 的資料總筆數，以筆數較多的為主（避免舊資料覆蓋新資料）
-          function countRecs(d){
-            if(!d||!d.data)return 0;
-            return Object.values(d.data).reduce((s,yd)=>{
-              return s+['expense','salary','saving','insurance','savIns','gift'].reduce((ss,k)=>ss+(Array.isArray(yd[k])?yd[k].length:0),0);
-            },0);
-          }
-          const fbCount=countRecs(fbData);
-          const localCount=countRecs(local);
-          // 選擇資料量較多的一份；若一樣多則用 savedAt 判斷
-          const useFB = !local || fbCount > localCount ||
-            (fbCount === localCount && fbData.savedAt && (!local.savedAt || fbData.savedAt >= local.savedAt));
-          if(useFB){
-            DB = fbData;
-            const fixed = (typeof dedupeAllData==='function') ? dedupeAllData() : false;
-            localStorage.setItem(SK, JSON.stringify(DB));
-            rebuildLists(); render();
-            showSync('saved', '✓ 已從雲端載入');
-            if (fixed) { pushToFirebase(); toast('✓ 已自動修復重複資料，金額已校正'); }
-          } else {
-            // 本機資料較新或較多，把本機資料推回 Firebase
-            showSync('saving', '本機資料較新，同步中…');
-            pushToFirebase();
-          }
-        } catch(e) {
+
+    const hasLocal = !!localStorage.getItem(SK);
+
+    if (!hasLocal) {
+      // ── 本機完全沒有資料（新裝置）→ 從 Firebase 載入 ──
+      get(ref(fbDB, FB_PATH)).then(snapshot => {
+        const fbData = snapshot.val();
+        if (fbData) {
           DB = fbData;
+          if (typeof dedupeAllData === 'function') dedupeAllData();
           localStorage.setItem(SK, JSON.stringify(DB));
           rebuildLists(); render();
+          showSync('saved', '✓ 已從雲端載入');
+        } else {
+          showSync('saved', '✓ 雲端連線成功');
         }
-      } else {
-        pushToFirebase();
-      }
-    }, { onlyOnce: true });
+      }).catch(() => showSync('offline', '⚠ 離線模式'));
+    } else {
+      // ── 本機有資料 → 直接用本機，把本機推上 Firebase 備份 ──
+      showSync('saving', '同步中…');
+      pushToFirebase();
+    }
   } catch(e) {
     console.warn('Firebase init error:', e);
     showSync('offline', '⚠ 離線模式');
   }
 }
+
+// 從雲端強制載入（手動按鈕用）
+window.loadFromCloud = async function() {
+  if (!firebaseReady || !fbDB) { toast('⚠ 尚未連線到雲端'); return; }
+  if (!confirm('確定要從雲端載入資料？\n這會覆蓋目前本機的所有資料！')) return;
+  try {
+    showSync('saving', '載入中…');
+    const snapshot = await get(ref(fbDB, FB_PATH));
+    const fbData = snapshot.val();
+    if (fbData) {
+      DB = fbData;
+      if (typeof dedupeAllData === 'function') dedupeAllData();
+      localStorage.setItem(SK, JSON.stringify(DB));
+      rebuildLists(); render();
+      showSync('saved', '✓ 已從雲端載入');
+      toast('✓ 已從雲端載入最新資料');
+    } else {
+      toast('⚠ 雲端沒有資料');
+      showSync('offline', '⚠ 雲端無資料');
+    }
+  } catch(e) {
+    toast('⚠ 載入失敗，請檢查網路');
+    showSync('offline', '⚠ 載入失敗');
+  }
+};
 
 let syncTimer = null;
 function pushToFirebase() {
@@ -2696,8 +2707,8 @@ function pushToFirebase() {
     showSync('saving', '同步中…');
     try {
       DB.savedAt = Date.now();
-      const dataRef = ref(fbDB, FB_PATH);
-      await set(dataRef, DB);
+      await set(ref(fbDB, FB_PATH), DB);
+      localStorage.setItem(SK, JSON.stringify(DB));
       showSync('saved', '✓ 已同步');
     } catch(e) {
       showSync('offline', '⚠ 同步失敗');
@@ -2709,6 +2720,7 @@ function showSync(state, text) {
   const badge = document.getElementById('syncBadge');
   const spinner = document.getElementById('syncSpinner');
   const label = document.getElementById('syncText');
+  if (!badge) return;
   badge.className = 'sync-badge ' + state;
   badge.style.opacity = '1';
   spinner.style.display = state === 'saving' ? 'block' : 'none';
