@@ -270,6 +270,7 @@ tr.swipeable.swiping td{transition:none;}
 .sync-badge.offline{color:#8b2020;}
 .sync-spinner{width:10px;height:10px;border:1.5px solid var(--m200);border-top-color:var(--m400);border-radius:50%;animation:spin .7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
+.sync-badge:hover,.sync-badge:active{opacity:1!important;cursor:pointer;border-color:var(--m400);}
 
 /* ── 拖曳排序 ──────────────────────────────── */
 .im-row{cursor:default;transition:background .15s,box-shadow .15s;}
@@ -282,9 +283,18 @@ tr.swipeable.swiping td{transition:none;}
 <body>
 
 <!-- 雲端同步狀態 -->
-<div class="sync-badge" id="syncBadge" style="opacity:0">
+<div class="sync-badge" id="syncBadge" style="opacity:0" onclick="onSyncBadgeClick()" title="點擊從雲端載入">
   <div class="sync-spinner" id="syncSpinner" style="display:none"></div>
   <span id="syncText">已同步</span>
+</div>
+<!-- 雲端同步按鈕（固定在畫面上方） -->
+<div id="cloudSyncBtn" onclick="loadFromCloud()" style="
+  position:fixed;top:calc(env(safe-area-inset-top,0px)+8px);left:12px;z-index:150;
+  display:flex;align-items:center;gap:5px;
+  background:rgba(255,255,255,.92);border:1.5px solid #d9b98a;border-radius:20px;
+  padding:5px 12px;font-size:12px;color:#8a6235;cursor:pointer;
+  box-shadow:0 2px 8px rgba(0,0,0,.1);">
+  ☁️ 從雲端載入
 </div>
 
 <div class="app">
@@ -2638,13 +2648,11 @@ let fbDB = null;
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getDatabase, ref, set, get } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
-// 計算資料總筆數（支出+薪資+存款）
 function countRecs(d) {
   if (!d || !d.data) return 0;
-  return Object.values(d.data).reduce((s, yd) => {
-    return s + ['expense','salary','saving'].reduce((ss, k) =>
-      ss + (Array.isArray(yd[k]) ? yd[k].length : 0), 0);
-  }, 0);
+  return Object.values(d.data).reduce((s, yd) =>
+    s + ['expense','salary','saving'].reduce((ss, k) =>
+      ss + (Array.isArray(yd[k]) ? yd[k].length : 0), 0), 0);
 }
 
 function initFirebase() {
@@ -2653,32 +2661,39 @@ function initFirebase() {
     fbDB = getDatabase(app);
     firebaseReady = true;
 
-    // 同時讀 Firebase，和本機比較筆數，多的那份獲勝
+    // 啟動時：比較 Firebase vs 本機的 savedAt（最後儲存時間）
+    // savedAt 代表「最後一次真正儲存資料的時間」，比筆數更可靠
     get(ref(fbDB, FB_PATH)).then(snapshot => {
       const fbData = snapshot.val();
       const localRaw = localStorage.getItem(SK);
-      const local = localRaw ? JSON.parse(localRaw) : null;
+      const local = localRaw ? (() => { try { return JSON.parse(localRaw); } catch(e) { return null; } })() : null;
 
-      const fbCount = countRecs(fbData);
-      const localCount = countRecs(local);
+      if (!fbData && !local) {
+        showSync('saved', '✓ 連線成功'); return;
+      }
+      if (!local) {
+        // 本機沒資料 → 直接從 Firebase 載入
+        useFirebaseData(fbData); return;
+      }
+      if (!fbData) {
+        // Firebase 沒資料 → 把本機推上去
+        pushToFirebase(); return;
+      }
 
-      console.log(`Firebase 筆數: ${fbCount}, 本機筆數: ${localCount}`);
+      const fbSaved = fbData.savedAt || 0;
+      const localSaved = local.savedAt || 0;
 
-      if (fbData && fbCount > localCount) {
-        // Firebase 資料比本機多 → 用 Firebase（先去重再存本機）
-        DB = fbData;
-        if (typeof dedupeAllData === 'function') dedupeAllData();
-        localStorage.setItem(SK, JSON.stringify(DB));
-        rebuildLists(); render();
-        showSync('saved', '✓ 已從雲端載入');
-      } else if (local && localCount >= fbCount) {
-        // 本機資料比 Firebase 多或一樣多 → 用本機，推上 Firebase
-        // DB 已在 load() 時從本機載入，直接推
+      if (fbSaved > localSaved) {
+        // Firebase 比本機新 → 用 Firebase
+        useFirebaseData(fbData);
+      } else if (localSaved > fbSaved) {
+        // 本機比 Firebase 新 → 推本機上去
         showSync('saving', '同步中…');
         pushToFirebase();
-      } else if (!local && !fbData) {
-        // 兩邊都沒資料
-        showSync('saved', '✓ 雲端連線成功');
+      } else {
+        // 時間一樣 → 不動，顯示已同步
+        showSync('saved', '✓ 已同步');
+        setTimeout(() => document.getElementById('syncBadge').style.opacity='0', 2000);
       }
     }).catch(e => {
       console.warn('Firebase 讀取失敗:', e);
@@ -2691,20 +2706,25 @@ function initFirebase() {
   }
 }
 
-// 手動從雲端強制載入（備份分頁用）
+function useFirebaseData(fbData) {
+  DB = fbData;
+  if (typeof dedupeAllData === 'function') dedupeAllData();
+  localStorage.setItem(SK, JSON.stringify(DB));
+  rebuildLists(); render();
+  showSync('saved', '✓ 已從雲端載入');
+  setTimeout(() => document.getElementById('syncBadge').style.opacity='0', 2500);
+}
+
+// 手動從雲端強制載入（左上角按鈕）
 window.loadFromCloud = async function() {
   if (!firebaseReady || !fbDB) { toast('⚠ 尚未連線到雲端'); return; }
-  if (!confirm('確定要從雲端載入資料？\n這會覆蓋目前本機的所有資料！')) return;
+  if (!confirm('從雲端載入最新資料？\n（會覆蓋手機目前的資料）')) return;
   try {
     showSync('saving', '載入中…');
     const snapshot = await get(ref(fbDB, FB_PATH));
     const fbData = snapshot.val();
     if (fbData) {
-      DB = fbData;
-      if (typeof dedupeAllData === 'function') dedupeAllData();
-      localStorage.setItem(SK, JSON.stringify(DB));
-      rebuildLists(); render();
-      showSync('saved', '✓ 已從雲端載入');
+      useFirebaseData(fbData);
       toast('✓ 已從雲端載入最新資料');
     } else {
       toast('⚠ 雲端沒有資料');
@@ -2713,6 +2733,13 @@ window.loadFromCloud = async function() {
   } catch(e) {
     toast('⚠ 載入失敗，請檢查網路');
     showSync('offline', '⚠ 載入失敗');
+  }
+};
+
+window.onSyncBadgeClick = function() {
+  const badge = document.getElementById('syncBadge');
+  if (badge.classList.contains('offline')) {
+    loadFromCloud();
   }
 };
 
@@ -2727,6 +2754,7 @@ function pushToFirebase() {
       await set(ref(fbDB, FB_PATH), DB);
       localStorage.setItem(SK, JSON.stringify(DB));
       showSync('saved', '✓ 已同步');
+      setTimeout(() => document.getElementById('syncBadge').style.opacity='0', 2500);
     } catch(e) {
       showSync('offline', '⚠ 同步失敗');
     }
@@ -2742,9 +2770,6 @@ function showSync(state, text) {
   badge.style.opacity = '1';
   spinner.style.display = state === 'saving' ? 'block' : 'none';
   label.textContent = text;
-  if (state === 'saved') {
-    setTimeout(() => { badge.style.opacity = '0'; }, 2500);
-  }
 }
 
 const _origSave = window.save;
