@@ -2622,9 +2622,6 @@ load();
 </script>
 
 <script type="module">
-// ══════════════════════════════════════════════
-// Firebase 設定
-// ══════════════════════════════════════════════
 const FIREBASE_CONFIG = {
   "apiKey": "AIzaSyBtc-FFel7yC68H0dI02Ce845T01zozp_g",
   "authDomain": "xian-manager.firebaseapp.com",
@@ -2641,40 +2638,60 @@ let fbDB = null;
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getDatabase, ref, set, get } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
+// 計算資料總筆數（支出+薪資+存款）
+function countRecs(d) {
+  if (!d || !d.data) return 0;
+  return Object.values(d.data).reduce((s, yd) => {
+    return s + ['expense','salary','saving'].reduce((ss, k) =>
+      ss + (Array.isArray(yd[k]) ? yd[k].length : 0), 0);
+  }, 0);
+}
+
 function initFirebase() {
   try {
     const app = initializeApp(FIREBASE_CONFIG);
     fbDB = getDatabase(app);
     firebaseReady = true;
 
-    const hasLocal = !!localStorage.getItem(SK);
+    // 同時讀 Firebase，和本機比較筆數，多的那份獲勝
+    get(ref(fbDB, FB_PATH)).then(snapshot => {
+      const fbData = snapshot.val();
+      const localRaw = localStorage.getItem(SK);
+      const local = localRaw ? JSON.parse(localRaw) : null;
 
-    if (!hasLocal) {
-      // ── 本機完全沒有資料（新裝置）→ 從 Firebase 載入 ──
-      get(ref(fbDB, FB_PATH)).then(snapshot => {
-        const fbData = snapshot.val();
-        if (fbData) {
-          DB = fbData;
-          if (typeof dedupeAllData === 'function') dedupeAllData();
-          localStorage.setItem(SK, JSON.stringify(DB));
-          rebuildLists(); render();
-          showSync('saved', '✓ 已從雲端載入');
-        } else {
-          showSync('saved', '✓ 雲端連線成功');
-        }
-      }).catch(() => showSync('offline', '⚠ 離線模式'));
-    } else {
-      // ── 本機有資料 → 直接用本機，把本機推上 Firebase 備份 ──
-      showSync('saving', '同步中…');
-      pushToFirebase();
-    }
+      const fbCount = countRecs(fbData);
+      const localCount = countRecs(local);
+
+      console.log(`Firebase 筆數: ${fbCount}, 本機筆數: ${localCount}`);
+
+      if (fbData && fbCount > localCount) {
+        // Firebase 資料比本機多 → 用 Firebase（先去重再存本機）
+        DB = fbData;
+        if (typeof dedupeAllData === 'function') dedupeAllData();
+        localStorage.setItem(SK, JSON.stringify(DB));
+        rebuildLists(); render();
+        showSync('saved', '✓ 已從雲端載入');
+      } else if (local && localCount >= fbCount) {
+        // 本機資料比 Firebase 多或一樣多 → 用本機，推上 Firebase
+        // DB 已在 load() 時從本機載入，直接推
+        showSync('saving', '同步中…');
+        pushToFirebase();
+      } else if (!local && !fbData) {
+        // 兩邊都沒資料
+        showSync('saved', '✓ 雲端連線成功');
+      }
+    }).catch(e => {
+      console.warn('Firebase 讀取失敗:', e);
+      showSync('offline', '⚠ 離線模式');
+    });
+
   } catch(e) {
     console.warn('Firebase init error:', e);
     showSync('offline', '⚠ 離線模式');
   }
 }
 
-// 從雲端強制載入（手動按鈕用）
+// 手動從雲端強制載入（備份分頁用）
 window.loadFromCloud = async function() {
   if (!firebaseReady || !fbDB) { toast('⚠ 尚未連線到雲端'); return; }
   if (!confirm('確定要從雲端載入資料？\n這會覆蓋目前本機的所有資料！')) return;
