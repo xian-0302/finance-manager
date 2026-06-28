@@ -297,6 +297,28 @@ tr.swipeable.swiping td{transition:none;}
   ☁️ 從雲端載入
 </div>
 
+<!-- 從雲端載入確認 Modal（iOS PWA 不能用 confirm()）-->
+<div id="cloudConfirmModal" style="display:none;position:fixed;inset:0;z-index:9999;
+  background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:24px;">
+  <div style="background:#fff;border-radius:16px;padding:24px;max-width:300px;width:100%;text-align:center;">
+    <div style="font-size:32px;margin-bottom:12px;">☁️</div>
+    <div style="font-weight:700;font-size:16px;color:#4d3418;margin-bottom:8px;">從雲端載入資料</div>
+    <div style="font-size:13px;color:#8a6235;margin-bottom:20px;line-height:1.5;">
+      這會覆蓋手機目前的所有資料，<br>改用雲端（電腦）最新版本。<br>確定繼續？
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="cancelLoadFromCloud()" style="flex:1;padding:12px;border:1.5px solid #d9b98a;
+        border-radius:10px;background:#fff;color:#8a6235;font-size:14px;font-weight:600;cursor:pointer;">
+        取消
+      </button>
+      <button onclick="doLoadFromCloud()" style="flex:1;padding:12px;border:none;
+        border-radius:10px;background:#c49a62;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">
+        確定載入
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="app">
   <div class="hd">
     <div class="hd-top">
@@ -2715,10 +2737,13 @@ function useFirebaseData(fbData) {
   setTimeout(() => document.getElementById('syncBadge').style.opacity='0', 2500);
 }
 
-// 手動從雲端強制載入（左上角按鈕）
-window.loadFromCloud = async function() {
+// 手動從雲端強制載入（左上角按鈕）— 用自訂 Modal，避免 iOS PWA 封鎖 confirm()
+window.loadFromCloud = function() {
   if (!firebaseReady || !fbDB) { toast('⚠ 尚未連線到雲端'); return; }
-  if (!confirm('從雲端載入最新資料？\n（會覆蓋手機目前的資料）')) return;
+  document.getElementById('cloudConfirmModal').style.display='flex';
+};
+window.doLoadFromCloud = async function() {
+  document.getElementById('cloudConfirmModal').style.display='none';
   try {
     showSync('saving', '載入中…');
     const snapshot = await get(ref(fbDB, FB_PATH));
@@ -2734,6 +2759,9 @@ window.loadFromCloud = async function() {
     toast('⚠ 載入失敗，請檢查網路');
     showSync('offline', '⚠ 載入失敗');
   }
+};
+window.cancelLoadFromCloud = function() {
+  document.getElementById('cloudConfirmModal').style.display='none';
 };
 
 window.onSyncBadgeClick = function() {
