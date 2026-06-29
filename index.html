@@ -2651,6 +2651,18 @@ function _delItemCancel(){
 }
 
 load();
+
+// ── 暴露給 Firebase module 使用的介面 ──
+window._getDB = () => DB;
+window._setDB = (v) => { DB = v; };
+window._getSK = () => SK;
+window._getNID = () => NID;
+window._setNID = (v) => { NID = v; };
+window._rebuildLists = () => rebuildLists();
+window._render = () => render();
+window._dedupeAllData = () => (typeof dedupeAllData === 'function' ? dedupeAllData() : false);
+window._save = () => save();
+window._toast = (msg) => toast(msg);
 </script>
 
 <script type="module">
@@ -2670,11 +2682,35 @@ let fbDB = null;
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getDatabase, ref, set, get } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
-function countRecs(d) {
-  if (!d || !d.data) return 0;
-  return Object.values(d.data).reduce((s, yd) =>
-    s + ['expense','salary','saving'].reduce((ss, k) =>
-      ss + (Array.isArray(yd[k]) ? yd[k].length : 0), 0), 0);
+// 透過 window 介面存取主程式變數（避免 ES module 作用域問題）
+const getDB = () => window._getDB();
+const setDB = (v) => window._setDB(v);
+const getSK = () => window._getSK();
+const rebuildAndRender = () => { window._rebuildLists(); window._render(); };
+const doSave = () => window._save();
+const showToast = (msg) => window._toast(msg);
+
+function showSync(state, text) {
+  const badge = document.getElementById('syncBadge');
+  const spinner = document.getElementById('syncSpinner');
+  const label = document.getElementById('syncText');
+  if (!badge) return;
+  badge.className = 'sync-badge ' + state;
+  badge.style.opacity = '1';
+  spinner.style.display = state === 'saving' ? 'block' : 'none';
+  label.textContent = text;
+  if (state === 'saved') {
+    setTimeout(() => { badge.style.opacity = '0'; }, 3000);
+  }
+}
+
+function applyFirebaseData(fbData) {
+  setDB(fbData);
+  window._dedupeAllData();
+  try {
+    localStorage.setItem(getSK(), JSON.stringify(getDB()));
+  } catch(e) {}
+  rebuildAndRender();
 }
 
 function initFirebase() {
@@ -2683,22 +2719,21 @@ function initFirebase() {
     fbDB = getDatabase(app);
     firebaseReady = true;
 
-    // 啟動時：比較 Firebase vs 本機的 savedAt（最後儲存時間）
-    // savedAt 代表「最後一次真正儲存資料的時間」，比筆數更可靠
     get(ref(fbDB, FB_PATH)).then(snapshot => {
       const fbData = snapshot.val();
-      const localRaw = localStorage.getItem(SK);
+      const localRaw = localStorage.getItem(getSK());
       const local = localRaw ? (() => { try { return JSON.parse(localRaw); } catch(e) { return null; } })() : null;
 
       if (!fbData && !local) {
         showSync('saved', '✓ 連線成功'); return;
       }
       if (!local) {
-        // 本機沒資料 → 直接從 Firebase 載入
-        useFirebaseData(fbData); return;
+        showSync('saving', '從雲端載入中…');
+        applyFirebaseData(fbData);
+        showSync('saved', '✓ 已從雲端載入');
+        return;
       }
       if (!fbData) {
-        // Firebase 沒資料 → 把本機推上去
         pushToFirebase(); return;
       }
 
@@ -2706,16 +2741,12 @@ function initFirebase() {
       const localSaved = local.savedAt || 0;
 
       if (fbSaved > localSaved) {
-        // Firebase 比本機新 → 用 Firebase
-        useFirebaseData(fbData);
-      } else if (localSaved > fbSaved) {
-        // 本機比 Firebase 新 → 推本機上去
-        showSync('saving', '同步中…');
-        pushToFirebase();
+        showSync('saving', '雲端有更新，載入中…');
+        applyFirebaseData(fbData);
+        showSync('saved', '✓ 已更新至最新資料');
       } else {
-        // 時間一樣 → 不動，顯示已同步
-        showSync('saved', '✓ 已同步');
-        setTimeout(() => document.getElementById('syncBadge').style.opacity='0', 2000);
+        // 本機較新或一樣，推本機到 Firebase
+        pushToFirebase();
       }
     }).catch(e => {
       console.warn('Firebase 讀取失敗:', e);
@@ -2728,78 +2759,63 @@ function initFirebase() {
   }
 }
 
-function useFirebaseData(fbData) {
-  DB = fbData;
-  if (typeof dedupeAllData === 'function') dedupeAllData();
-  localStorage.setItem(SK, JSON.stringify(DB));
-  rebuildLists(); render();
-  showSync('saved', '✓ 已從雲端載入');
-  setTimeout(() => document.getElementById('syncBadge').style.opacity='0', 2500);
-}
-
-// 手動從雲端強制載入（左上角按鈕）— 用自訂 Modal，避免 iOS PWA 封鎖 confirm()
+// 從雲端強制載入（手動按鈕）
 window.loadFromCloud = function() {
-  if (!firebaseReady || !fbDB) { toast('⚠ 尚未連線到雲端'); return; }
-  document.getElementById('cloudConfirmModal').style.display='flex';
+  if (!firebaseReady || !fbDB) { showToast('⚠ 尚未連線到雲端'); return; }
+  document.getElementById('cloudConfirmModal').style.display = 'flex';
 };
+
 window.doLoadFromCloud = async function() {
-  document.getElementById('cloudConfirmModal').style.display='none';
+  document.getElementById('cloudConfirmModal').style.display = 'none';
   try {
     showSync('saving', '載入中…');
     const snapshot = await get(ref(fbDB, FB_PATH));
     const fbData = snapshot.val();
     if (fbData) {
-      useFirebaseData(fbData);
-      toast('✓ 已從雲端載入最新資料');
+      applyFirebaseData(fbData);
+      showSync('saved', '✓ 已從雲端載入');
+      showToast('✓ 已從雲端載入最新資料');
     } else {
-      toast('⚠ 雲端沒有資料');
+      showToast('⚠ 雲端沒有資料，請先在電腦端儲存一次');
       showSync('offline', '⚠ 雲端無資料');
     }
   } catch(e) {
-    toast('⚠ 載入失敗，請檢查網路');
+    console.error('loadFromCloud error:', e);
+    showToast('⚠ 載入失敗：' + e.message);
     showSync('offline', '⚠ 載入失敗');
   }
 };
+
 window.cancelLoadFromCloud = function() {
-  document.getElementById('cloudConfirmModal').style.display='none';
+  document.getElementById('cloudConfirmModal').style.display = 'none';
 };
 
 window.onSyncBadgeClick = function() {
   const badge = document.getElementById('syncBadge');
-  if (badge.classList.contains('offline')) {
-    loadFromCloud();
-  }
+  if (badge && badge.classList.contains('offline')) loadFromCloud();
 };
 
 let syncTimer = null;
 function pushToFirebase() {
-  if (!firebaseReady || !fbDB || !DB) return;
+  if (!firebaseReady || !fbDB) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(async () => {
     showSync('saving', '同步中…');
     try {
-      DB.savedAt = Date.now();
-      await set(ref(fbDB, FB_PATH), DB);
-      localStorage.setItem(SK, JSON.stringify(DB));
+      const db = getDB();
+      if (!db) return;
+      db.savedAt = Date.now();
+      await set(ref(fbDB, FB_PATH), db);
+      try { localStorage.setItem(getSK(), JSON.stringify(db)); } catch(e) {}
       showSync('saved', '✓ 已同步');
-      setTimeout(() => document.getElementById('syncBadge').style.opacity='0', 2500);
     } catch(e) {
+      console.warn('pushToFirebase error:', e);
       showSync('offline', '⚠ 同步失敗');
     }
   }, 1500);
 }
 
-function showSync(state, text) {
-  const badge = document.getElementById('syncBadge');
-  const spinner = document.getElementById('syncSpinner');
-  const label = document.getElementById('syncText');
-  if (!badge) return;
-  badge.className = 'sync-badge ' + state;
-  badge.style.opacity = '1';
-  spinner.style.display = state === 'saving' ? 'block' : 'none';
-  label.textContent = text;
-}
-
+// 攔截 save()，每次儲存後推到 Firebase
 const _origSave = window.save;
 window.save = function() {
   _origSave && _origSave();
